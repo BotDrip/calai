@@ -57,6 +57,7 @@ type MacroCardProps = {
 function MacroDonut({ label, value, target, color }: MacroCardProps) {
   const percent = Math.min((value / target) * 100, 100);
   
+  // Added animate-in class
   return (
     <article className="glass-card space-y-3 p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-soft">
       <div className="flex items-center justify-between">
@@ -84,7 +85,7 @@ export default function Dashboard() {
   const protein = macroStats.find((macro) => macro.label === 'Protein');
   const proteinPercent = protein ? Math.round((protein.value / protein.target) * 100) : 0;
   
-  // Calculate Energy Balance (just a mock logic for now based on remaining cals)
+  // Calculate Energy Balance (mock logic based on remaining cals)
   const energyBalance = Math.round((remaining / goal) * 100); 
   const recoveryScore = Math.min(98, 70 + hydrationStats.streak);
 
@@ -130,11 +131,15 @@ export default function Dashboard() {
   ];
 
   return (
-    <section className="space-y-8 p-6 pb-20"> {/* Added padding for mobile bottom nav */}
+    <section className="space-y-8 p-6 pb-20"> 
       
       {/* --- HERO SECTION --- */}
-      <section className="glass-card relative overflow-hidden p-8 shadow-glass transition-all duration-500">
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-white/40 to-emerald-50/20" />
+      {/* Added 'animate-in' and updated gradient for tech feel */}
+      <section 
+        className="animate-in glass-card relative overflow-hidden p-8 shadow-glass transition-all duration-500"
+        style={{ animationDelay: '0ms' }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 via-transparent to-blue-500/10" />
         
         <div className="relative z-10 grid gap-8 lg:grid-cols-[1.3fr,auto] lg:items-center">
           <div className="space-y-6">
@@ -223,13 +228,15 @@ export default function Dashboard() {
       </section>
 
       {/* --- METRICS GRID --- */}
+      {/* Added animate-in with staggered delay */}
       <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        {metrics.map((metric) => {
+        {metrics.map((metric, i) => {
           const Icon = metric.icon;
           return (
             <article
               key={metric.label}
-              className="glass-card flex flex-col justify-between p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-md border border-white/60"
+              className="animate-in glass-card flex flex-col justify-between p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-md border border-white/60"
+              style={{ animationDelay: `${(i + 1) * 100}ms` }}
             >
               <div className="flex items-start justify-between mb-4">
                 <div>
@@ -259,7 +266,11 @@ export default function Dashboard() {
       </section>
 
       {/* --- MACROS SECTION --- */}
-      <section className="space-y-4">
+      {/* Added animate-in */}
+      <section 
+        className="animate-in space-y-4"
+        style={{ animationDelay: '500ms' }}
+      >
         <div className="flex items-center justify-between px-1">
           <h3 className="text-xl font-bold text-slate-800">Macro Balance Today</h3>
           <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-600 border border-indigo-100">
@@ -295,7 +306,11 @@ export default function Dashboard() {
       </section>
 
       {/* --- QUICK ACTIONS --- */}
-      <section className="glass-card p-6 border border-white/60">
+      {/* Added animate-in */}
+      <section 
+        className="animate-in glass-card p-6 border border-white/60"
+        style={{ animationDelay: '600ms' }}
+      >
         <h3 className="mb-4 text-sm font-bold text-slate-400 uppercase tracking-wide">Quick Actions</h3>
         <div className="flex flex-wrap gap-3">
           {['Scan Food', 'Log Water', 'Add Workout', 'Update Weight'].map((action, idx) => (

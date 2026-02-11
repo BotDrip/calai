@@ -4,71 +4,60 @@
 
 @layer base {
   :root {
-    --color-base: #f4fafb;
-    --color-primary: #0ea5e9;
-    --color-accent: #22c55e;
-    --color-text: #1f2937;
-  }
-
-  * {
-    @apply antialiased;
+    --color-base: #0f172a;
   }
 
   body {
     font-family: 'Inter', sans-serif;
-    color: #1f2937;
-    background: radial-gradient(circle at top, rgba(14, 165, 233, 0.12), transparent 45%),
-      radial-gradient(circle at 20% 20%, rgba(34, 197, 94, 0.08), transparent 40%),
-      var(--color-base);
+    color: #1e293b;
+    /* Dynamic Mesh Gradient Background */
+    background-color: #f0f4f8;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(14, 165, 233, 0.3) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(34, 197, 94, 0.3) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.3) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, rgba(244, 63, 94, 0.1) 0px, transparent 50%);
+    background-attachment: fixed;
     min-height: 100vh;
-  }
-
-  h1,
-  h2,
-  h3,
-  h4 {
-    font-family: 'Poppins', 'Inter', sans-serif;
-    color: #1f2937;
   }
 }
 
 @layer components {
+  /* Updated Glass Card with better depth */
   .glass-card {
-    @apply rounded-3xl bg-white/70 backdrop-blur-xl shadow-glass border border-white/60;
+    @apply rounded-3xl bg-white/60 backdrop-blur-xl border border-white/50 shadow-xl shadow-slate-200/50 transition-all duration-300;
   }
-
-  .floating-label {
-    @apply absolute left-4 top-3 text-sm text-slate-500 transition-all duration-200 pointer-events-none;
-  }
-
-  .input-field {
-    @apply w-full rounded-2xl border border-white/80 bg-white/70 px-4 pb-2 pt-6 text-sm text-charcoal shadow-soft outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30;
-  }
-
-  .input-peer:focus ~ .floating-label,
-  .input-peer:not(:placeholder-shown) ~ .floating-label {
-    @apply top-1 text-xs text-primary;
+  
+  .glass-card:hover {
+    @apply bg-white/80 -translate-y-1 shadow-2xl shadow-primary/10;
   }
 
   .button-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-white shadow-soft transition hover:-translate-y-0.5 hover:bg-sky-500;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary to-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-primary/30 transition-all active:scale-95 hover:shadow-primary/50;
   }
 
-  .button-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white/70 px-5 py-3 text-sm font-semibold text-charcoal shadow-soft transition hover:-translate-y-0.5 hover:border-primary/50;
+  /* Animations */
+  .animate-in {
+    animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    opacity: 0;
+    transform: translateY(20px);
   }
 
-  .label-pill {
-    @apply rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-600;
-  }
-}
-
-@layer utilities {
-  .font-body {
-    font-family: 'Inter', sans-serif;
+  @keyframes fadeUp {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
-  .font-heading {
-    font-family: 'Poppins', 'Inter', sans-serif;
+  .scan-line {
+    animation: scan 2s linear infinite;
+  }
+
+  @keyframes scan {
+    0% { top: 0%; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
   }
 }

@@ -9,23 +9,18 @@ import {
   Loader2,
   Sparkles,
   Upload,
+  ScanLine,
 } from 'lucide-react';
 import { useMealPlanner } from '../context/MealPlannerContext';
 import type { MealSlot, NutritionPayload } from '../context/MealPlannerContext';
 import { useToast } from '../context/ToastContext';
-import { analyzeFoodImage } from '../lib/gemini'; // Import the AI function
+import { analyzeFoodImage } from '../lib/gemini';
 
 type ScanResult = {
   foodName: string;
   confidence: number;
   nutrition: NutritionPayload;
   insights: string[];
-  budgetAlternative?: {
-    name: string;
-    portion: string;
-    protein: string;
-    note: string;
-  };
 };
 
 const mealOptions: MealSlot[] = ['morning', 'afternoon', 'evening', 'night'];
@@ -56,9 +51,10 @@ export default function FoodScan() {
   const chartData = useMemo(() => macroChartData(scanResult), [scanResult]);
 
   const stopCameraStream = () => {
-    if (!streamRef.current) return;
-    streamRef.current.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -68,85 +64,75 @@ export default function FoodScan() {
   useEffect(() => {
     return () => {
       stopCameraStream();
-      setSelectedImage(null);
-      setScanResult(null);
-      setScanError(null);
     };
   }, []);
 
   const openCamera = async () => {
     setScanError(null);
     setScanResult(null);
-    setAddedToMeal(false);
     setSelectedImage(null);
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const message = 'Camera not supported in this browser. Please upload an image.';
-      setScanError(message);
-      pushToast(message, 'error');
+      pushToast('Camera not supported. Please upload an image.', 'error');
       return;
     }
 
     try {
-      stopCameraStream();
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stopCameraStream(); // Close existing first
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } // Prefer back camera on mobile
+      });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      
       setIsCameraOn(true);
-      pushToast('Camera permission granted. Live preview ready.', 'success');
+      
+      // Small delay to ensure ref is attached
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(e => console.error("Play error:", e));
+        }
+      }, 100);
+      
+      pushToast('Camera active.', 'success');
     } catch (error) {
-      setScanError('Unable to start camera. Try image upload instead.');
-      pushToast('Unable to start camera.', 'error');
-      stopCameraStream();
+      console.error(error);
+      setScanError('Unable to access camera. Check permissions.');
+      pushToast('Camera permission denied.', 'error');
+      setIsCameraOn(false);
     }
   };
 
   const capturePhoto = () => {
-    if (!videoRef.current || !isCameraOn) {
-      pushToast('Camera is not active. Open camera first.', 'error');
-      return;
-    }
+    if (!videoRef.current || !isCameraOn) return;
 
     try {
       const video = videoRef.current;
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
       const context = canvas.getContext('2d');
 
-      if (!context) throw new Error('Canvas context unavailable.');
-
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.8); // Compressed for API
-
-      setSelectedImage(imageDataUrl);
-      setScanResult(null);
-      setScanError(null);
-      setAddedToMeal(false);
-      stopCameraStream();
-      pushToast('Photo captured successfully.', 'success');
-    } catch {
-      setScanError('Failed to capture photo. Please try again.');
-      pushToast('Failed to capture photo.', 'error');
+      if (context) {
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        
+        setSelectedImage(imageDataUrl);
+        stopCameraStream();
+        pushToast('Photo captured!', 'success');
+      }
+    } catch (e) {
+      console.error(e);
+      pushToast('Capture failed.', 'error');
     }
   };
 
   const handleUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    event.target.value = '';
     if (!file) return;
 
-    setScanError(null);
-    setScanResult(null);
-    setAddedToMeal(false);
-    stopCameraStream();
-
     if (!file.type.startsWith('image/')) {
-      const message = 'Invalid file type. Please select an image file.';
-      setScanError(message);
-      pushToast(message, 'error');
+      pushToast('Please upload a valid image file.', 'error');
       return;
     }
 
@@ -154,165 +140,199 @@ export default function FoodScan() {
     reader.onload = () => {
       if (typeof reader.result === 'string') {
         setSelectedImage(reader.result);
-        pushToast('Image uploaded successfully.', 'success');
+        setScanResult(null);
+        setScanError(null);
+        stopCameraStream();
+        pushToast('Image loaded.', 'success');
       }
     };
     reader.readAsDataURL(file);
+    // Reset input so same file can be selected again
+    event.target.value = '';
   };
 
   const scanFood = async () => {
-    setScanError(null);
-    setAddedToMeal(false);
-
     if (!selectedImage) {
-      const message = 'No image selected. Capture or upload an image before scanning.';
-      setScanError(message);
-      pushToast(message, 'info');
+      pushToast('No image to scan!', 'info');
       return;
     }
 
     setIsScanning(true);
-    setScanResult(null);
+    setScanError(null);
 
     try {
-      // --- REAL AI CALL HAPPENS HERE ---
       const aiData = await analyzeFoodImage(selectedImage);
       
       const mappedResult: ScanResult = {
-        foodName: aiData.foodName,
-        confidence: aiData.healthScore * 10, // Approximate confidence from health score
+        foodName: aiData.foodName || "Unknown Food",
+        confidence: aiData.healthScore ? aiData.healthScore * 10 : 85,
         nutrition: {
-          calories: aiData.calories,
-          protein: aiData.protein,
-          carbs: aiData.carbs,
-          fats: aiData.fats,
-          fiber: 0, // Gemini vision often misses fiber, defaulting to 0 or estimates
-          estimatedWeight: 0, // Difficult to guess weight from 2D image without reference
+          calories: aiData.calories || 0,
+          protein: aiData.protein || 0,
+          carbs: aiData.carbs || 0,
+          fats: aiData.fats || 0,
+          fiber: 0,
+          estimatedWeight: 0,
         },
         insights: [
-          aiData.recommendation,
-          `Health Score: ${aiData.healthScore}/10`,
+          aiData.recommendation || "Enjoy your meal!",
+          `Health Score: ${aiData.healthScore || 5}/10`
         ],
-        // You can ask the AI for budget alternatives specifically if you update the prompt in gemini.ts
       };
 
       setScanResult(mappedResult);
-      pushToast('Analysis complete!', 'success');
+      pushToast('Analysis Complete!', 'success');
     } catch (error) {
-      console.error(error);
-      setScanError('AI Analysis failed. Please try a clearer image.');
-      pushToast('AI Analysis failed.', 'error');
+      setScanError('AI could not identify this food. Try a clearer angle.');
+      pushToast('Scan failed. See console for details.', 'error');
     } finally {
       setIsScanning(false);
     }
   };
 
   const handleAddToMeal = () => {
-    if (!scanResult) {
-      pushToast('Scan food first to add it into Meal Planner.', 'info');
-      return;
-    }
+    if (!scanResult) return;
     addScanToMeal(selectedMeal, scanResult.foodName, scanResult.nutrition);
     setAddedToMeal(true);
-    pushToast(`Added to ${selectedMeal} meal planner totals.`, 'success');
+    pushToast('Meal logged successfully!', 'success');
   };
 
   return (
-    <section className="space-y-6">
-      <article className="glass-card p-6">
+    <section className="space-y-6 pb-20">
+      
+      {/* Scanner Card */}
+      <article className="glass-card p-6 animate-in" style={{ animationDelay: '0ms' }}>
         <div className="mb-4 flex items-center gap-2">
-          <Sparkles size={18} className="text-primary" />
+          <div className="p-2 bg-gradient-to-r from-primary to-blue-600 rounded-xl text-white shadow-lg shadow-primary/30">
+            <ScanLine size={20} />
+          </div>
           <h2 className="text-xl font-bold text-slate-800">AI Food Scanner</h2>
         </div>
 
-        <div className={`relative overflow-hidden rounded-3xl border border-white/70 bg-white/60 p-4 transition-all ${isScanning ? 'ring-2 ring-primary/40' : ''}`}>
-          {isScanning && <div className="pointer-events-none absolute inset-0 animate-pulse bg-primary/5" />}
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-2xl bg-slate-900 p-3">
-              <div className="relative aspect-video overflow-hidden rounded-xl bg-slate-800">
-                {isCameraOn ? (
-                  <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
-                ) : selectedImage ? (
-                  <img src={selectedImage} alt="Selected food preview" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full items-center justify-center px-4 text-center text-sm text-slate-400">
-                    Open camera or upload image to scan food
+        <div className={`relative overflow-hidden rounded-3xl border-2 border-slate-200/50 bg-slate-900 transition-all ${isScanning ? 'ring-4 ring-primary/30 border-primary' : ''}`}>
+          
+          <div className="absolute inset-0 z-0 opacity-20 pointer-events-none" 
+             style={{ backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '20px 20px' }} 
+          />
+
+          <div className="relative z-10 grid gap-4 lg:grid-cols-2 p-4">
+            
+            {/* Viewfinder */}
+            <div className="relative aspect-video overflow-hidden rounded-2xl bg-slate-800 ring-1 ring-white/10 shadow-inner group">
+              {isCameraOn ? (
+                <>
+                   <video 
+                     ref={videoRef} 
+                     autoPlay 
+                     playsInline 
+                     muted 
+                     onLoadedMetadata={() => videoRef.current?.play()}
+                     className="h-full w-full object-cover opacity-90" 
+                   />
+                   <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-primary/20 to-transparent scan-line h-1/4 w-full z-20 border-b-2 border-primary/60 shadow-[0_0_20px_rgba(14,165,233,0.5)]"></div>
+                </>
+              ) : selectedImage ? (
+                <>
+                  <img src={selectedImage} alt="Preview" className="h-full w-full object-cover" />
+                  {isScanning && (
+                     <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-primary/20 to-transparent scan-line h-1/4 w-full z-20 border-b-2 border-primary/60 shadow-[0_0_20px_rgba(14,165,233,0.5)]"></div>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col gap-3 h-full items-center justify-center px-4 text-center text-sm text-slate-400">
+                  <div className="p-4 rounded-full bg-slate-700/50 group-hover:bg-slate-700 transition-colors">
+                    <Camera size={32} className="text-slate-500 group-hover:text-white transition-colors" />
                   </div>
-                )}
-              </div>
+                  <span>Tap "Open Camera" to start</span>
+                </div>
+              )}
             </div>
 
-            <div className="space-y-3">
-              <button className="button-ghost w-full justify-start" type="button" onClick={openCamera}>
-                <Camera size={16} /> Open Camera
-              </button>
-
-              {isCameraOn && (
-                <button className="button-ghost w-full justify-start" type="button" onClick={capturePhoto}>
+            {/* Controls */}
+            <div className="space-y-3 flex flex-col justify-center">
+              {!isCameraOn ? (
+                <button className="button-ghost w-full justify-start hover:bg-white text-slate-200 hover:text-slate-800 border-slate-700 hover:border-white transition-all" type="button" onClick={openCamera}>
+                  <Camera size={16} /> Open Camera
+                </button>
+              ) : (
+                <button className="button-primary w-full justify-start" type="button" onClick={capturePhoto}>
                   <ImagePlus size={16} /> Capture Photo
                 </button>
               )}
 
-              <label className="button-ghost flex w-full cursor-pointer items-center justify-start">
+              <label className="button-ghost w-full flex cursor-pointer items-center justify-start hover:bg-white text-slate-200 hover:text-slate-800 border-slate-700 hover:border-white transition-all">
                 <Upload size={16} /> Upload Image
                 <input type="file" accept="image/*" className="hidden" onChange={handleUpload} />
               </label>
 
-              <button className="button-primary w-full justify-start" type="button" onClick={scanFood} disabled={isScanning}>
+              <button className="button-primary w-full justify-start mt-2" type="button" onClick={scanFood} disabled={isScanning || !selectedImage}>
                 {isScanning ? <Loader2 size={16} className="animate-spin" /> : <Cpu size={16} />}
-                {isScanning ? 'Analyzing...' : 'Scan Food'}
+                {isScanning ? 'Processing...' : 'Scan Food'}
               </button>
 
-              <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
-                {scanError ? scanError : isScanning ? 'AI processing image...' : selectedImage ? 'Ready to scan' : 'Ready for AI scan'}
+              <div className="rounded-xl bg-slate-800/50 p-3 text-xs text-slate-400 border border-slate-700">
+                {scanError ? (
+                  <span className="text-red-400">{scanError}</span>
+                ) : isScanning ? (
+                  <span className="text-primary animate-pulse">AI is analyzing nutrition data...</span>
+                ) : selectedImage ? (
+                  <span className="text-green-400">Image ready. Click 'Scan Food'.</span>
+                ) : (
+                  'Ready to scan'
+                )}
               </div>
             </div>
           </div>
         </div>
       </article>
 
+      {/* Results Section */}
       {scanResult && (
-        <article className="grid gap-6 lg:grid-cols-3">
+        <article className="grid gap-6 lg:grid-cols-3 animate-in" style={{ animationDelay: '200ms' }}>
+          
           <div className="glass-card space-y-4 p-6 lg:col-span-2">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase text-slate-500">Detected Food</p>
-                <h3 className="text-lg font-bold text-slate-800">{scanResult.foodName}</h3>
+                <p className="text-xs font-semibold uppercase text-slate-500 tracking-wider">Detected Food</p>
+                <h3 className="text-2xl font-bold text-slate-800">{scanResult.foodName}</h3>
               </div>
-              <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                AI Confidence: {scanResult.confidence}%
+              <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700 shadow-sm border border-emerald-200">
+                <Sparkles size={12} /> {scanResult.confidence}% Confidence
               </span>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="h-52 rounded-2xl bg-white/70 p-3">
+            <div className="grid gap-6 md:grid-cols-2 items-center">
+              <div className="h-48 rounded-2xl bg-slate-50 p-2 border border-slate-100 relative">
+                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-0">
+                    <span className="text-2xl font-bold text-slate-700">{scanResult.nutrition.calories}</span>
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Kcal</span>
+                 </div>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={chartData} dataKey="value" innerRadius={55} outerRadius={78} stroke="none" paddingAngle={5}>
+                    <Pie data={chartData} dataKey="value" innerRadius={60} outerRadius={80} stroke="none" paddingAngle={4} cornerRadius={4}>
                       {chartData.map((entry) => (
                         <Cell key={entry.name} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none' }} />
+                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {[
-                  { key: 'Calories', value: scanResult.nutrition.calories, max: 900 },
-                  { key: 'Protein (g)', value: scanResult.nutrition.protein, max: 60 },
-                  { key: 'Carbs (g)', value: scanResult.nutrition.carbs, max: 120 },
-                  { key: 'Fats (g)', value: scanResult.nutrition.fats, max: 45 },
+                  { key: 'Protein', value: scanResult.nutrition.protein, max: 50, color: 'bg-primary' },
+                  { key: 'Carbs', value: scanResult.nutrition.carbs, max: 100, color: 'bg-emerald-500' },
+                  { key: 'Fats', value: scanResult.nutrition.fats, max: 40, color: 'bg-amber-500' },
                 ].map((item) => (
                   <div key={item.key} className="space-y-1">
-                    <div className="flex justify-between text-xs">
+                    <div className="flex justify-between text-xs font-medium">
                       <span className="text-slate-500">{item.key}</span>
-                      <span className="font-semibold text-slate-800">{item.value}</span>
+                      <span className="text-slate-800">{item.value}g</span>
                     </div>
                     <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                       <div
-                        className="h-full rounded-full bg-primary/80 transition-all duration-500"
+                        className={`h-full rounded-full ${item.color} transition-all duration-1000`}
                         style={{ width: `${Math.min((item.value / item.max) * 100, 100)}%` }}
                       />
                     </div>
@@ -322,63 +342,46 @@ export default function FoodScan() {
             </div>
           </div>
 
-          <div className="glass-card space-y-4 p-6">
-            <h3 className="text-base font-bold text-slate-800">Add to Meal</h3>
-            <select
-              className="w-full rounded-2xl border border-white/80 bg-white/80 px-4 py-3 text-sm outline-none"
-              value={selectedMeal}
-              onChange={(event) => setSelectedMeal(event.target.value as MealSlot)}
-            >
-              {mealOptions.map((meal) => (
-                <option key={meal} value={meal}>
-                  {meal.charAt(0).toUpperCase() + meal.slice(1)}
-                </option>
-              ))}
-            </select>
+          <div className="space-y-6">
+             <div className="glass-card space-y-4 p-6">
+                <h3 className="text-base font-bold text-slate-800">Add to Meal</h3>
+                <div className="relative">
+                   <select
+                     className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                     value={selectedMeal}
+                     onChange={(event) => setSelectedMeal(event.target.value as MealSlot)}
+                   >
+                     {mealOptions.map((meal) => (
+                       <option key={meal} value={meal}>
+                         {meal.charAt(0).toUpperCase() + meal.slice(1)}
+                       </option>
+                     ))}
+                   </select>
+                </div>
 
-            <button className="button-primary w-full justify-center" type="button" onClick={handleAddToMeal}>
-              Add to Meal Planner
-            </button>
+                <button className="button-primary w-full justify-center" type="button" onClick={handleAddToMeal}>
+                  Add to Planner
+                </button>
+                {addedToMeal && (
+                  <p className="flex items-center gap-2 rounded-xl bg-green-50 px-3 py-2 text-xs font-medium text-green-700 border border-green-100">
+                    <CheckCircle2 size={14} /> Added!
+                  </p>
+                )}
+             </div>
 
-            {addedToMeal && (
-              <p className="flex items-center gap-2 rounded-xl bg-green-50 px-3 py-2 text-xs text-green-700">
-                <CheckCircle2 size={14} /> Meal Planner totals updated.
-              </p>
-            )}
+             <div className="glass-card p-6">
+               <h3 className="mb-3 text-base font-bold text-slate-800">AI Insights</h3>
+               <ul className="space-y-2 text-sm text-slate-600">
+                 {scanResult.insights.map((insight, idx) => (
+                   <li key={idx} className="rounded-xl bg-slate-50 p-3 border border-slate-100">
+                     {insight}
+                   </li>
+                 ))}
+               </ul>
+             </div>
           </div>
         </article>
       )}
-
-      {scanResult && (
-        <article className="glass-card p-6">
-          <h3 className="mb-3 text-base font-bold text-slate-800">Smart AI Insights</h3>
-          <ul className="space-y-2 text-sm text-slate-600">
-            {scanResult.insights.map((insight, idx) => (
-              <li key={idx} className="rounded-xl bg-white/80 p-3">
-                {insight}
-              </li>
-            ))}
-          </ul>
-        </article>
-      )}
-
-      <article className="glass-card p-6">
-        <h3 className="mb-3 text-base font-bold text-slate-800">History</h3>
-        {scanHistory.length === 0 ? (
-          <p className="text-sm text-slate-500">No scans added to meals yet.</p>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {scanHistory.slice(0, 6).map((entry) => (
-              <div key={entry.id} className="rounded-2xl bg-white/80 p-4 text-sm text-slate-600">
-                <p className="font-semibold text-slate-800">{entry.foodName}</p>
-                <p className="text-xs text-slate-500">
-                  {entry.nutrition.calories} kcal | P {entry.nutrition.protein}g
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </article>
     </section>
   );
 }
