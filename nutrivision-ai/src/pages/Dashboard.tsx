@@ -7,68 +7,86 @@ import {
   TrendingUp,
   Utensils,
   Zap,
-} from 'lucide-react'
-import { calorieStats, hydrationStats, macroStats } from '../data/dashboard'
+} from 'lucide-react';
+import { calorieStats, hydrationStats, macroStats } from '../data/dashboard';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
-type MacroCardProps = {
-  label: string
-  value: number
-  target: number
-  color: string
-}
+// --- Visualization Components ---
 
-function CircularProgress({ percent }: { percent: number }) {
-  const value = Math.max(0, Math.min(100, percent))
+function RechartsProgress({ percent, color }: { percent: number; color: string }) {
+  const data = [
+    { name: 'Completed', value: percent },
+    { name: 'Remaining', value: 100 - percent },
+  ];
+
   return (
-    <div
-      className="relative h-44 w-44 rounded-full p-3 shadow-soft transition-transform duration-300 hover:scale-[1.02]"
-      style={{
-        background: `conic-gradient(#0ea5e9 ${value}%, rgba(255,255,255,0.2) ${value}% 100%)`,
-      }}
-    >
-      <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-white/85 backdrop-blur-md">
-        <p className="text-3xl font-bold text-slate-800">{Math.round(value)}%</p>
-        <p className="text-xs font-medium text-slate-500">Goal Hit</p>
+    <div className="h-28 w-28 relative mx-auto">
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={data}
+            cx="50%"
+            cy="50%"
+            innerRadius={38}
+            outerRadius={50}
+            startAngle={90}
+            endAngle={-270}
+            dataKey="value"
+            stroke="none"
+          >
+            <Cell fill={color} />
+            <Cell fill="#e2e8f0" /> 
+          </Pie>
+        </PieChart>
+      </ResponsiveContainer>
+      {/* Center Text */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <span className="text-sm font-bold text-slate-700">{Math.round(percent)}%</span>
       </div>
     </div>
-  )
+  );
 }
 
+type MacroCardProps = {
+  label: string;
+  value: number;
+  target: number;
+  color: string;
+};
+
 function MacroDonut({ label, value, target, color }: MacroCardProps) {
-  const percent = Math.min((value / target) * 100, 100)
+  const percent = Math.min((value / target) * 100, 100);
+  
   return (
     <article className="glass-card space-y-3 p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-soft">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-700">{label}</h3>
-        <span className="text-xs font-semibold text-slate-500">{Math.round(percent)}%</span>
+        <span className="text-xs font-semibold text-slate-500">{value}g / {target}g</span>
       </div>
-      <div
-        className="mx-auto h-28 w-28 rounded-full p-2 transition-all duration-500"
-        style={{
-          background: `conic-gradient(${color} ${percent}%, rgba(226,232,240,0.7) ${percent}% 100%)`,
-        }}
-      >
-        <div className="flex h-full w-full items-center justify-center rounded-full bg-white/85 text-xs font-bold text-slate-700">
-          {value}g
-        </div>
-      </div>
+      
+      {/* Recharts Ring */}
+      <RechartsProgress percent={percent} color={color} />
+
       <p className="text-center text-xs text-slate-500">
-        {value}g / {target}g
+        {percent >= 100 ? 'Goal Met!' : `${Math.round(target - value)}g remaining`}
       </p>
     </article>
-  )
+  );
 }
 
 export default function Dashboard() {
-  const consumed = calorieStats.consumed
-  const goal = calorieStats.goal
-  const remaining = goal - consumed
-  const caloriePercent = (consumed / goal) * 100
-  const hydrationPercent = Math.round((hydrationStats.day / hydrationStats.goal) * 100)
-  const protein = macroStats.find((macro) => macro.label === 'Protein')
-  const proteinPercent = protein ? Math.round((protein.value / protein.target) * 100) : 0
-  const energyBalance = Math.round((remaining / goal) * 100 + 50)
-  const recoveryScore = Math.min(98, 70 + hydrationStats.streak)
+  const consumed = calorieStats.consumed;
+  const goal = calorieStats.goal;
+  const remaining = goal - consumed;
+  const caloriePercent = Math.min((consumed / goal) * 100, 100);
+  
+  const hydrationPercent = Math.round((hydrationStats.day / hydrationStats.goal) * 100);
+  const protein = macroStats.find((macro) => macro.label === 'Protein');
+  const proteinPercent = protein ? Math.round((protein.value / protein.target) * 100) : 0;
+  
+  // Calculate Energy Balance (just a mock logic for now based on remaining cals)
+  const energyBalance = Math.round((remaining / goal) * 100); 
+  const recoveryScore = Math.min(98, 70 + hydrationStats.streak);
 
   const metrics = [
     {
@@ -103,98 +121,153 @@ export default function Dashboard() {
       iconStyle: 'bg-emerald-100 text-emerald-500',
       fillStyle: 'from-emerald-400 to-teal-500',
     },
-  ]
+  ];
+
+  // Main Calorie Pie Data
+  const calorieData = [
+    { name: 'Consumed', value: consumed, color: '#10B981' }, // Emerald
+    { name: 'Remaining', value: remaining, color: '#E2E8F0' }, // Slate 200
+  ];
 
   return (
-    <section className="space-y-8">
+    <section className="space-y-8 p-6 pb-20"> {/* Added padding for mobile bottom nav */}
+      
+      {/* --- HERO SECTION --- */}
       <section className="glass-card relative overflow-hidden p-8 shadow-glass transition-all duration-500">
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/20 via-white/20 to-emerald-100/20" />
+        <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-white/40 to-emerald-50/20" />
+        
         <div className="relative z-10 grid gap-8 lg:grid-cols-[1.3fr,auto] lg:items-center">
-          <div className="space-y-5">
+          <div className="space-y-6">
+            {/* Header Tags */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="label-pill">Performance Overview</span>
-              <span className="flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-semibold text-primary">
+              <span className="px-3 py-1 rounded-full bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wider">
+                Overview
+              </span>
+              <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                 <Sparkles size={12} /> AI Active
               </span>
-              <span className="flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700 shadow-[0_0_14px_rgba(34,197,94,0.4)]">
+              <span className="flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700 shadow-sm">
                 <TrendingUp size={12} /> On Track
               </span>
             </div>
 
+            {/* Title */}
             <div>
-              <h2 className="text-4xl font-bold text-slate-800">Good Morning, Athlete</h2>
-              <p className="mt-1 text-sm text-slate-500">Fuel smart. Recover harder. Perform better.</p>
+              <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-800 tracking-tight">
+                Good Morning, <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-600">Athlete</span>
+              </h2>
+              <p className="mt-2 text-sm text-slate-500 font-medium">
+                Fuel smart. Recover harder. Perform better.
+              </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:max-w-2xl lg:grid-cols-3">
-              <div className="rounded-2xl bg-white/70 p-3 backdrop-blur-sm">
-                <p className="text-xs text-slate-500">Today&apos;s Goal</p>
-                <p className="text-xl font-bold text-slate-800">{goal} kcal</p>
+            {/* Quick Stats Grid */}
+            <div className="grid gap-3 sm:grid-cols-3 max-w-xl">
+              <div className="rounded-2xl bg-white/60 p-4 backdrop-blur-md border border-white/50 shadow-sm">
+                <p className="text-xs font-semibold text-slate-400 uppercase">Goal</p>
+                <p className="text-xl font-bold text-slate-800">{goal} <span className="text-xs font-normal text-slate-500">kcal</span></p>
               </div>
-              <div className="rounded-2xl bg-white/70 p-3 backdrop-blur-sm">
-                <p className="text-xs text-slate-500">Consumed</p>
-                <p className="text-xl font-bold text-primary">{consumed} kcal</p>
+              <div className="rounded-2xl bg-white/60 p-4 backdrop-blur-md border border-white/50 shadow-sm">
+                <p className="text-xs font-semibold text-slate-400 uppercase">Consumed</p>
+                <p className="text-xl font-bold text-emerald-600">{consumed} <span className="text-xs font-normal text-slate-500">kcal</span></p>
               </div>
-              <div className="rounded-2xl bg-white/70 p-3 backdrop-blur-sm">
-                <p className="text-xs text-slate-500">Remaining</p>
-                <p className="text-xl font-bold text-emerald-600">{remaining} kcal</p>
+              <div className="rounded-2xl bg-white/60 p-4 backdrop-blur-md border border-white/50 shadow-sm">
+                <p className="text-xs font-semibold text-slate-400 uppercase">Left</p>
+                <p className="text-xl font-bold text-slate-800">{remaining} <span className="text-xs font-normal text-slate-500">kcal</span></p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 rounded-2xl bg-orange-50/80 px-4 py-2 text-sm text-orange-700 ring-1 ring-orange-100">
-              <Flame size={16} className="animate-pulse text-orange-500" />
-              <span className="font-semibold">{hydrationStats.streak} Day Streak</span>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <button className="button-primary shadow-lg shadow-primary/25" type="button">
-                <ScanLine size={17} />
+            {/* Action Buttons */}
+            <div className="flex flex-wrap gap-3 pt-2">
+              <button className="flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 hover:bg-slate-800 hover:shadow-xl transition-all active:scale-95">
+                <ScanLine size={16} />
                 Scan Meal
               </button>
-              <button className="button-ghost" type="button">
-                View Full Analysis
+              <button className="flex items-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm border border-slate-200 hover:bg-slate-50 transition-all active:scale-95">
+                View Details
               </button>
             </div>
           </div>
 
-          <div className="mx-auto">
-            <CircularProgress percent={caloriePercent} />
+          {/* Large Hero Chart */}
+          <div className="hidden lg:block h-64 w-64 relative">
+             <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={calorieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={80}
+                    outerRadius={100}
+                    paddingAngle={5}
+                    dataKey="value"
+                    stroke="none"
+                    cornerRadius={8}
+                  >
+                    {calorieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                  />
+                </PieChart>
+             </ResponsiveContainer>
+             {/* Center Stats in Chart */}
+             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className="text-3xl font-bold text-slate-800">{Math.round(caloriePercent)}%</span>
+                <span className="text-xs text-slate-500 uppercase font-semibold">Complete</span>
+             </div>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* --- METRICS GRID --- */}
+      <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => {
-          const Icon = metric.icon
+          const Icon = metric.icon;
           return (
             <article
               key={metric.label}
-              className="glass-card space-y-4 p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-soft"
+              className="glass-card flex flex-col justify-between p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-md border border-white/60"
             >
-              <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${metric.iconStyle}`}>
-                <Icon size={18} />
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{metric.label}</p>
+                   <p className="text-2xl font-bold text-slate-800 mt-1">{metric.value}</p>
+                </div>
+                <div className={`p-2.5 rounded-xl ${metric.iconStyle}`}>
+                  <Icon size={20} />
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-slate-500">{metric.label}</p>
-                <p className="text-2xl font-bold text-slate-800">{metric.value}</p>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className={`h-full rounded-full bg-gradient-to-r ${metric.fillStyle} transition-all duration-700`}
-                  style={{ width: `${Math.min(metric.percent, 100)}%` }}
-                />
+              
+              <div className="space-y-2">
+                 <div className="flex justify-between text-xs text-slate-400">
+                    <span>Progress</span>
+                    <span>{metric.percent}%</span>
+                 </div>
+                 <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={`h-full rounded-full bg-gradient-to-r ${metric.fillStyle} transition-all duration-1000 ease-out`}
+                      style={{ width: `${Math.min(metric.percent, 100)}%` }}
+                    />
+                  </div>
               </div>
             </article>
-          )
+          );
         })}
       </section>
 
+      {/* --- MACROS SECTION --- */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between px-1">
           <h3 className="text-xl font-bold text-slate-800">Macro Balance Today</h3>
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">AI Monitored</span>
+          <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-600 border border-indigo-100">
+            AI Optimized
+          </span>
         </div>
-        <div className="grid gap-4 md:grid-cols-3">
+        
+        <div className="grid gap-5 md:grid-cols-3">
           {macroStats.map((macro) => (
             <MacroDonut
               key={macro.label}
@@ -205,19 +278,35 @@ export default function Dashboard() {
             />
           ))}
         </div>
-        <p className="rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
-          Protein slightly low for muscle gain.
-        </p>
+        
+        <div className="rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 p-1">
+           <div className="flex items-center justify-between rounded-xl bg-white/95 p-4 backdrop-blur-sm">
+              <div className="flex items-center gap-3">
+                 <div className="p-2 bg-indigo-100 rounded-full text-indigo-600">
+                    <BrainCircuit size={18} />
+                 </div>
+                 <p className="text-sm font-medium text-slate-700">
+                    <span className="font-bold text-indigo-600">AI Insight:</span> Protein intake is 15g below target for muscle recovery.
+                 </p>
+              </div>
+              <button className="text-xs font-bold text-indigo-600 hover:text-indigo-800">Fix</button>
+           </div>
+        </div>
       </section>
 
-      <section className="glass-card p-5">
-        <h3 className="mb-4 text-base font-bold text-slate-800">Quick Actions</h3>
+      {/* --- QUICK ACTIONS --- */}
+      <section className="glass-card p-6 border border-white/60">
+        <h3 className="mb-4 text-sm font-bold text-slate-400 uppercase tracking-wide">Quick Actions</h3>
         <div className="flex flex-wrap gap-3">
-          {['Scan Food', 'Add Manual Meal', 'Log Water', 'Update Weight'].map((action) => (
+          {['Scan Food', 'Log Water', 'Add Workout', 'Update Weight'].map((action, idx) => (
             <button
               key={action}
               type="button"
-              className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm font-medium text-slate-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:text-primary"
+              className={`rounded-xl px-5 py-3 text-sm font-semibold transition-all duration-200 active:scale-95
+                 ${idx === 0 
+                    ? 'bg-slate-800 text-white shadow-lg shadow-slate-800/20 hover:bg-slate-700' 
+                    : 'bg-white border border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                 }`}
             >
               {action}
             </button>
@@ -225,10 +314,6 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <section className="rounded-3xl bg-gradient-to-r from-slate-900 to-slate-800 px-6 py-4 text-white shadow-soft">
-        <p className="text-sm font-medium text-slate-200">Discipline beats motivation. Stay consistent.</p>
-        <p className="mt-1 text-xs text-cyan-300">You are performing better than 82% of users this week.</p>
-      </section>
     </section>
-  )
+  );
 }

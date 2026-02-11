@@ -1,299 +1,221 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent } from 'react'
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import {
   Camera,
   CheckCircle2,
   Cpu,
   ImagePlus,
-  IndianRupee,
   Loader2,
   Sparkles,
   Upload,
-} from 'lucide-react'
-import { useMealPlanner } from '../context/MealPlannerContext'
-import type { MealSlot, NutritionPayload } from '../context/MealPlannerContext'
-import { useToast } from '../context/ToastContext'
+} from 'lucide-react';
+import { useMealPlanner } from '../context/MealPlannerContext';
+import type { MealSlot, NutritionPayload } from '../context/MealPlannerContext';
+import { useToast } from '../context/ToastContext';
+import { analyzeFoodImage } from '../lib/gemini'; // Import the AI function
 
 type ScanResult = {
-  foodName: string
-  confidence: number
-  nutrition: NutritionPayload
-  insights: string[]
+  foodName: string;
+  confidence: number;
+  nutrition: NutritionPayload;
+  insights: string[];
   budgetAlternative?: {
-    name: string
-    portion: string
-    protein: string
-    note: string
-  }
-}
+    name: string;
+    portion: string;
+    protein: string;
+    note: string;
+  };
+};
 
-const mealOptions: MealSlot[] = ['morning', 'afternoon', 'evening', 'night']
-
-const scanSamples: ScanResult[] = [
-  {
-    foodName: 'Boiled Eggs with Salad',
-    confidence: 91,
-    nutrition: {
-      calories: 320,
-      protein: 28,
-      carbs: 12,
-      fats: 18,
-      fiber: 4,
-      estimatedWeight: 260,
-    },
-    insights: [
-      'Protein quality is strong for recovery.',
-      'Fat intake is moderate, keep remaining meals lighter.',
-      'Add one fruit for better micronutrient coverage.',
-    ],
-  },
-  {
-    foodName: 'Paneer Butter Masala with Roti',
-    confidence: 92,
-    nutrition: {
-      calories: 560,
-      protein: 22,
-      carbs: 48,
-      fats: 30,
-      fiber: 7,
-      estimatedWeight: 340,
-    },
-    insights: [
-      'High fat content detected.',
-      'Protein is low for muscle gain at this calorie load.',
-      'Add dal or egg whites to improve protein density.',
-    ],
-  },
-  {
-    foodName: 'Protein Bar',
-    confidence: 90,
-    nutrition: {
-      calories: 290,
-      protein: 12,
-      carbs: 24,
-      fats: 11,
-      fiber: 4,
-      estimatedWeight: 60,
-    },
-    insights: [
-      'Convenient snack but low protein per rupee.',
-      'Use only around workout windows.',
-      'Pair with curd or milk for satiety.',
-    ],
-    budgetAlternative: {
-      name: 'Roasted Chana',
-      portion: '50g',
-      protein: '8g',
-      note: 'Budget-friendly and works for prep snacking.',
-    },
-  },
-]
-
-function pickMockResult(imageName: string | null) {
-  const normalized = (imageName ?? '').toLowerCase()
-  if (normalized.includes('bar') || normalized.includes('snack')) return scanSamples[2]
-  if (normalized.includes('paneer') || normalized.includes('roti')) return scanSamples[1]
-  return scanSamples[0]
-}
+const mealOptions: MealSlot[] = ['morning', 'afternoon', 'evening', 'night'];
 
 function macroChartData(result: ScanResult | null) {
-  if (!result) return []
+  if (!result) return [];
   return [
     { name: 'Protein', value: result.nutrition.protein, color: '#0EA5E9' },
     { name: 'Carbs', value: result.nutrition.carbs, color: '#22C55E' },
     { name: 'Fats', value: result.nutrition.fats, color: '#F59E0B' },
-  ]
+  ];
 }
 
 export default function FoodScan() {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const scanTimeoutRef = useRef<number | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  const [isCameraOn, setIsCameraOn] = useState(false)
-  const [selectedImage, setSelectedImage] = useState<string | null>(null)
-  const [selectedImageName, setSelectedImageName] = useState<string | null>(null)
-  const [isScanning, setIsScanning] = useState(false)
-  const [scanResult, setScanResult] = useState<ScanResult | null>(null)
-  const [scanError, setScanError] = useState<string | null>(null)
-  const [selectedMeal, setSelectedMeal] = useState<MealSlot>('morning')
-  const [addedToMeal, setAddedToMeal] = useState(false)
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [selectedMeal, setSelectedMeal] = useState<MealSlot>('morning');
+  const [addedToMeal, setAddedToMeal] = useState(false);
 
-  const { addScanToMeal, scanHistory } = useMealPlanner()
-  const { pushToast } = useToast()
-  const chartData = useMemo(() => macroChartData(scanResult), [scanResult])
+  const { addScanToMeal, scanHistory } = useMealPlanner();
+  const { pushToast } = useToast();
+  const chartData = useMemo(() => macroChartData(scanResult), [scanResult]);
 
   const stopCameraStream = () => {
-    if (!streamRef.current) return
-    streamRef.current.getTracks().forEach((track) => track.stop())
-    streamRef.current = null
+    if (!streamRef.current) return;
+    streamRef.current.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
     if (videoRef.current) {
-      videoRef.current.srcObject = null
+      videoRef.current.srcObject = null;
     }
-    setIsCameraOn(false)
-  }
+    setIsCameraOn(false);
+  };
 
   useEffect(() => {
     return () => {
-      stopCameraStream()
-      if (scanTimeoutRef.current) {
-        window.clearTimeout(scanTimeoutRef.current)
-      }
-      setSelectedImage(null)
-      setScanResult(null)
-      setScanError(null)
-    }
-  }, [])
+      stopCameraStream();
+      setSelectedImage(null);
+      setScanResult(null);
+      setScanError(null);
+    };
+  }, []);
 
   const openCamera = async () => {
-    setScanError(null)
-    setScanResult(null)
-    setAddedToMeal(false)
-    setSelectedImage(null)
-    setSelectedImageName(null)
+    setScanError(null);
+    setScanResult(null);
+    setAddedToMeal(false);
+    setSelectedImage(null);
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const message = 'Camera not supported in this browser. Please upload an image.'
-      setScanError(message)
-      pushToast(message, 'error')
-      return
+      const message = 'Camera not supported in this browser. Please upload an image.';
+      setScanError(message);
+      pushToast(message, 'error');
+      return;
     }
 
     try {
-      stopCameraStream()
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true })
-      streamRef.current = stream
+      stopCameraStream();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      streamRef.current = stream;
       if (videoRef.current) {
-        videoRef.current.srcObject = stream
+        videoRef.current.srcObject = stream;
       }
-      setIsCameraOn(true)
-      pushToast('Camera permission granted. Live preview ready.', 'success')
+      setIsCameraOn(true);
+      pushToast('Camera permission granted. Live preview ready.', 'success');
     } catch (error) {
-      const errorName = error instanceof DOMException ? error.name : ''
-      const message =
-        errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError'
-          ? 'Camera permission denied. Please allow camera access or upload an image.'
-          : 'Unable to start camera. Try image upload instead.'
-      setScanError(message)
-      pushToast(message, 'error')
-      stopCameraStream()
+      setScanError('Unable to start camera. Try image upload instead.');
+      pushToast('Unable to start camera.', 'error');
+      stopCameraStream();
     }
-  }
+  };
 
   const capturePhoto = () => {
     if (!videoRef.current || !isCameraOn) {
-      pushToast('Camera is not active. Open camera first.', 'error')
-      return
+      pushToast('Camera is not active. Open camera first.', 'error');
+      return;
     }
 
     try {
-      const video = videoRef.current
-      const canvas = document.createElement('canvas')
-      canvas.width = video.videoWidth || 1280
-      canvas.height = video.videoHeight || 720
-      const context = canvas.getContext('2d')
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      const context = canvas.getContext('2d');
 
-      if (!context) {
-        throw new Error('Canvas context unavailable.')
-      }
+      if (!context) throw new Error('Canvas context unavailable.');
 
-      context.drawImage(video, 0, 0, canvas.width, canvas.height)
-      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.92)
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.8); // Compressed for API
 
-      setSelectedImage(imageDataUrl)
-      setSelectedImageName('captured-photo.jpg')
-      setScanResult(null)
-      setScanError(null)
-      setAddedToMeal(false)
-      stopCameraStream()
-      pushToast('Photo captured successfully.', 'success')
+      setSelectedImage(imageDataUrl);
+      setScanResult(null);
+      setScanError(null);
+      setAddedToMeal(false);
+      stopCameraStream();
+      pushToast('Photo captured successfully.', 'success');
     } catch {
-      setScanError('Failed to capture photo. Please try again.')
-      pushToast('Failed to capture photo.', 'error')
+      setScanError('Failed to capture photo. Please try again.');
+      pushToast('Failed to capture photo.', 'error');
     }
-  }
+  };
 
   const handleUpload = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
 
-    setScanError(null)
-    setScanResult(null)
-    setAddedToMeal(false)
-    stopCameraStream()
+    setScanError(null);
+    setScanResult(null);
+    setAddedToMeal(false);
+    stopCameraStream();
 
     if (!file.type.startsWith('image/')) {
-      const message = 'Invalid file type. Please select an image file.'
-      setScanError(message)
-      pushToast(message, 'error')
-      return
+      const message = 'Invalid file type. Please select an image file.';
+      setScanError(message);
+      pushToast(message, 'error');
+      return;
     }
 
-    const reader = new FileReader()
+    const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result !== 'string') {
-        const message = 'Unable to read selected image. Try another file.'
-        setScanError(message)
-        pushToast(message, 'error')
-        return
+      if (typeof reader.result === 'string') {
+        setSelectedImage(reader.result);
+        pushToast('Image uploaded successfully.', 'success');
       }
+    };
+    reader.readAsDataURL(file);
+  };
 
-      setSelectedImage(reader.result)
-      setSelectedImageName(file.name)
-      pushToast('Image uploaded successfully.', 'success')
-    }
-
-    reader.onerror = () => {
-      const message = 'Upload failed while reading image.'
-      setScanError(message)
-      pushToast(message, 'error')
-    }
-
-    reader.readAsDataURL(file)
-  }
-
-  const scanFood = () => {
-    setScanError(null)
-    setAddedToMeal(false)
+  const scanFood = async () => {
+    setScanError(null);
+    setAddedToMeal(false);
 
     if (!selectedImage) {
-      const message = 'No image selected. Capture or upload an image before scanning.'
-      setScanError(message)
-      pushToast(message, 'info')
-      return
+      const message = 'No image selected. Capture or upload an image before scanning.';
+      setScanError(message);
+      pushToast(message, 'info');
+      return;
     }
 
-    setIsScanning(true)
-    setScanResult(null)
+    setIsScanning(true);
+    setScanResult(null);
 
-    if (scanTimeoutRef.current) {
-      window.clearTimeout(scanTimeoutRef.current)
+    try {
+      // --- REAL AI CALL HAPPENS HERE ---
+      const aiData = await analyzeFoodImage(selectedImage);
+      
+      const mappedResult: ScanResult = {
+        foodName: aiData.foodName,
+        confidence: aiData.healthScore * 10, // Approximate confidence from health score
+        nutrition: {
+          calories: aiData.calories,
+          protein: aiData.protein,
+          carbs: aiData.carbs,
+          fats: aiData.fats,
+          fiber: 0, // Gemini vision often misses fiber, defaulting to 0 or estimates
+          estimatedWeight: 0, // Difficult to guess weight from 2D image without reference
+        },
+        insights: [
+          aiData.recommendation,
+          `Health Score: ${aiData.healthScore}/10`,
+        ],
+        // You can ask the AI for budget alternatives specifically if you update the prompt in gemini.ts
+      };
+
+      setScanResult(mappedResult);
+      pushToast('Analysis complete!', 'success');
+    } catch (error) {
+      console.error(error);
+      setScanError('AI Analysis failed. Please try a clearer image.');
+      pushToast('AI Analysis failed.', 'error');
+    } finally {
+      setIsScanning(false);
     }
-
-    scanTimeoutRef.current = window.setTimeout(() => {
-      try {
-        const result = pickMockResult(selectedImageName)
-        setScanResult(result)
-      } catch {
-        setScanError('Scan failed. Please try with a clearer image.')
-        pushToast('Scan failed. Try again.', 'error')
-      } finally {
-        setIsScanning(false)
-      }
-    }, 1600)
-  }
+  };
 
   const handleAddToMeal = () => {
     if (!scanResult) {
-      pushToast('Scan food first to add it into Meal Planner.', 'info')
-      return
+      pushToast('Scan food first to add it into Meal Planner.', 'info');
+      return;
     }
-    addScanToMeal(selectedMeal, scanResult.foodName, scanResult.nutrition)
-    setAddedToMeal(true)
-    pushToast(`Added to ${selectedMeal} meal planner totals.`, 'success')
-  }
+    addScanToMeal(selectedMeal, scanResult.foodName, scanResult.nutrition);
+    setAddedToMeal(true);
+    pushToast(`Added to ${selectedMeal} meal planner totals.`, 'success');
+  };
 
   return (
     <section className="space-y-6">
@@ -303,11 +225,7 @@ export default function FoodScan() {
           <h2 className="text-xl font-bold text-slate-800">AI Food Scanner</h2>
         </div>
 
-        <div
-          className={`relative overflow-hidden rounded-3xl border border-white/70 bg-white/60 p-4 transition-all ${
-            isScanning ? 'ring-2 ring-primary/40' : ''
-          }`}
-        >
+        <div className={`relative overflow-hidden rounded-3xl border border-white/70 bg-white/60 p-4 transition-all ${isScanning ? 'ring-2 ring-primary/40' : ''}`}>
           {isScanning && <div className="pointer-events-none absolute inset-0 animate-pulse bg-primary/5" />}
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-2xl bg-slate-900 p-3">
@@ -326,36 +244,27 @@ export default function FoodScan() {
 
             <div className="space-y-3">
               <button className="button-ghost w-full justify-start" type="button" onClick={openCamera}>
-                <Camera size={16} />
-                Open Camera
+                <Camera size={16} /> Open Camera
               </button>
 
               {isCameraOn && (
                 <button className="button-ghost w-full justify-start" type="button" onClick={capturePhoto}>
-                  <ImagePlus size={16} />
-                  Capture Photo
+                  <ImagePlus size={16} /> Capture Photo
                 </button>
               )}
 
               <label className="button-ghost flex w-full cursor-pointer items-center justify-start">
-                <Upload size={16} />
-                Upload Image
+                <Upload size={16} /> Upload Image
                 <input type="file" accept="image/*" className="hidden" onChange={handleUpload} />
               </label>
 
               <button className="button-primary w-full justify-start" type="button" onClick={scanFood} disabled={isScanning}>
                 {isScanning ? <Loader2 size={16} className="animate-spin" /> : <Cpu size={16} />}
-                Scan Food
+                {isScanning ? 'Analyzing...' : 'Scan Food'}
               </button>
 
               <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
-                {scanError
-                  ? scanError
-                  : isScanning
-                    ? 'AI processing image with nutrition mapping...'
-                    : selectedImageName
-                      ? `Ready to scan: ${selectedImageName}`
-                      : 'Ready for AI scan'}
+                {scanError ? scanError : isScanning ? 'AI processing image...' : selectedImage ? 'Ready to scan' : 'Ready for AI scan'}
               </div>
             </div>
           </div>
@@ -371,7 +280,7 @@ export default function FoodScan() {
                 <h3 className="text-lg font-bold text-slate-800">{scanResult.foodName}</h3>
               </div>
               <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                Confidence: {scanResult.confidence}%
+                AI Confidence: {scanResult.confidence}%
               </span>
             </div>
 
@@ -395,7 +304,6 @@ export default function FoodScan() {
                   { key: 'Protein (g)', value: scanResult.nutrition.protein, max: 60 },
                   { key: 'Carbs (g)', value: scanResult.nutrition.carbs, max: 120 },
                   { key: 'Fats (g)', value: scanResult.nutrition.fats, max: 45 },
-                  { key: 'Fiber (g)', value: scanResult.nutrition.fiber, max: 20 },
                 ].map((item) => (
                   <div key={item.key} className="space-y-1">
                     <div className="flex justify-between text-xs">
@@ -410,9 +318,6 @@ export default function FoodScan() {
                     </div>
                   </div>
                 ))}
-                <p className="text-xs text-slate-500">
-                  Estimated weight: {scanResult.nutrition.estimatedWeight}g
-                </p>
               </div>
             </div>
           </div>
@@ -440,49 +345,25 @@ export default function FoodScan() {
                 <CheckCircle2 size={14} /> Meal Planner totals updated.
               </p>
             )}
-
-            {scanResult.budgetAlternative && (
-              <div className="rounded-2xl bg-orange-50 p-4 ring-1 ring-orange-100">
-                <p className="mb-2 flex items-center gap-1 text-xs font-semibold uppercase text-orange-600">
-                  <IndianRupee size={12} /> Budget Friendly Alternative
-                </p>
-                <p className="text-sm font-semibold text-slate-800">{scanResult.budgetAlternative.name}</p>
-                <p className="text-xs text-slate-600">{scanResult.budgetAlternative.portion}</p>
-                <p className="mt-1 text-xs text-slate-600">Protein: {scanResult.budgetAlternative.protein}</p>
-                <p className="mt-1 text-xs text-slate-600">{scanResult.budgetAlternative.note}</p>
-              </div>
-            )}
           </div>
         </article>
       )}
 
       {scanResult && (
-        <article className="grid gap-6 lg:grid-cols-2">
-          <div className="glass-card p-6">
-            <h3 className="mb-3 text-base font-bold text-slate-800">Smart AI Insights</h3>
-            <ul className="space-y-2 text-sm text-slate-600">
-              {scanResult.insights.map((insight) => (
-                <li key={insight} className="rounded-xl bg-white/80 p-3">
-                  {insight}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="glass-card p-6">
-            <h3 className="mb-3 text-base font-bold text-slate-800">Academic ML Stack</h3>
-            <ul className="space-y-2 text-sm text-slate-600">
-              <li className="rounded-xl bg-white/80 p-3">Computer Vision food recognition with pretrained CNN (MobileNet/EfficientNet).</li>
-              <li className="rounded-xl bg-white/80 p-3">Image classification mapped to nutrition dataset and macro estimates.</li>
-              <li className="rounded-xl bg-white/80 p-3">Portion estimation logic with confidence-based recommendation scoring.</li>
-              <li className="rounded-xl bg-white/80 p-3">AI recommendation layer for athlete-focused and budget-friendly decisions.</li>
-            </ul>
-          </div>
+        <article className="glass-card p-6">
+          <h3 className="mb-3 text-base font-bold text-slate-800">Smart AI Insights</h3>
+          <ul className="space-y-2 text-sm text-slate-600">
+            {scanResult.insights.map((insight, idx) => (
+              <li key={idx} className="rounded-xl bg-white/80 p-3">
+                {insight}
+              </li>
+            ))}
+          </ul>
         </article>
       )}
 
       <article className="glass-card p-6">
-        <h3 className="mb-3 text-base font-bold text-slate-800">Weekly Scanned Food History</h3>
+        <h3 className="mb-3 text-base font-bold text-slate-800">History</h3>
         {scanHistory.length === 0 ? (
           <p className="text-sm text-slate-500">No scans added to meals yet.</p>
         ) : (
@@ -491,11 +372,7 @@ export default function FoodScan() {
               <div key={entry.id} className="rounded-2xl bg-white/80 p-4 text-sm text-slate-600">
                 <p className="font-semibold text-slate-800">{entry.foodName}</p>
                 <p className="text-xs text-slate-500">
-                  Added to {entry.meal} | {new Date(entry.addedAt).toLocaleDateString()}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {entry.nutrition.calories} kcal | P {entry.nutrition.protein}g | C {entry.nutrition.carbs}g | F{' '}
-                  {entry.nutrition.fats}g
+                  {entry.nutrition.calories} kcal | P {entry.nutrition.protein}g
                 </p>
               </div>
             ))}
@@ -503,5 +380,5 @@ export default function FoodScan() {
         )}
       </article>
     </section>
-  )
+  );
 }
