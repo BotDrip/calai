@@ -10,17 +10,26 @@ import {
   Sparkles,
   Upload,
   ScanLine,
+  History,
+  TrendingUp,
+  Trash2,
 } from 'lucide-react';
 import { useMealPlanner } from '../context/MealPlannerContext';
 import type { MealSlot, NutritionPayload } from '../context/MealPlannerContext';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { analyzeFoodImage } from '../lib/gemini';
+import { foodScanService, type FoodScan } from '../lib/supabase';
 
 type ScanResult = {
   foodName: string;
   confidence: number;
   nutrition: NutritionPayload;
   insights: string[];
+  portionSize?: string;
+  category?: string;
+  suitableFor?: string;
+  micronutrients?: string;
 };
 
 const mealOptions: MealSlot[] = ['morning', 'afternoon', 'evening', 'night'];
@@ -45,10 +54,42 @@ export default function FoodScan() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [selectedMeal, setSelectedMeal] = useState<MealSlot>('morning');
   const [addedToMeal, setAddedToMeal] = useState(false);
+  const [recentScans, setRecentScans] = useState<FoodScan[]>([]);
+  const [analytics, setAnalytics] = useState<{ total: number; avgConfidence: number; totalCalories: number } | null>(null);
 
-  const { addScanToMeal, scanHistory } = useMealPlanner();
+  const { addScanToMeal } = useMealPlanner();
   const { pushToast } = useToast();
+  const { user } = useAuth();
   const chartData = useMemo(() => macroChartData(scanResult), [scanResult]);
+
+  useEffect(() => {
+    loadScanHistory();
+    return () => {
+      stopCameraStream();
+    };
+  }, [user]);
+
+  const loadScanHistory = async () => {
+    if (!user) return;
+
+    try {
+      const [scans, stats] = await Promise.all([
+        foodScanService.getUserScans(user.uid, 10),
+        foodScanService.getUserAnalytics(user.uid),
+      ]);
+
+      setRecentScans(scans || []);
+      if (stats) {
+        setAnalytics({
+          total: stats.total_scans,
+          avgConfidence: Math.round(stats.avg_confidence),
+          totalCalories: Math.round(stats.total_calories_scanned),
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load scan history:', error);
+    }
+  };
 
   const stopCameraStream = () => {
     if (streamRef.current) {
@@ -61,16 +102,11 @@ export default function FoodScan() {
     setIsCameraOn(false);
   };
 
-  useEffect(() => {
-    return () => {
-      stopCameraStream();
-    };
-  }, []);
-
   const openCamera = async () => {
     setScanError(null);
     setScanResult(null);
     setSelectedImage(null);
+    setAddedToMeal(false);
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       pushToast('Camera not supported. Please upload an image.', 'error');
@@ -78,22 +114,21 @@ export default function FoodScan() {
     }
 
     try {
-      stopCameraStream(); // Close existing first
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } // Prefer back camera on mobile
+      stopCameraStream();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
       });
       streamRef.current = stream;
-      
+
       setIsCameraOn(true);
-      
-      // Small delay to ensure ref is attached
+
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.play().catch(e => console.error("Play error:", e));
         }
       }, 100);
-      
+
       pushToast('Camera active.', 'success');
     } catch (error) {
       console.error(error);
@@ -116,9 +151,10 @@ export default function FoodScan() {
       if (context) {
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         const imageDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        
+
         setSelectedImage(imageDataUrl);
         stopCameraStream();
+        setAddedToMeal(false);
         pushToast('Photo captured!', 'success');
       }
     } catch (e) {
@@ -142,12 +178,12 @@ export default function FoodScan() {
         setSelectedImage(reader.result);
         setScanResult(null);
         setScanError(null);
+        setAddedToMeal(false);
         stopCameraStream();
-        pushToast('Image loaded.', 'success');
+        pushToast('Image loaded successfully.', 'success');
       }
     };
     reader.readAsDataURL(file);
-    // Reset input so same file can be selected again
     event.target.value = '';
   };
 
@@ -157,51 +193,125 @@ export default function FoodScan() {
       return;
     }
 
+    if (!user) {
+      pushToast('Please sign in to use the scanner', 'error');
+      return;
+    }
+
     setIsScanning(true);
     setScanError(null);
 
     try {
       const aiData = await analyzeFoodImage(selectedImage);
-      
+
       const mappedResult: ScanResult = {
         foodName: aiData.foodName || "Unknown Food",
-        confidence: aiData.healthScore ? aiData.healthScore * 10 : 85,
+        confidence: aiData.confidenceScore || 85,
         nutrition: {
           calories: aiData.calories || 0,
           protein: aiData.protein || 0,
           carbs: aiData.carbs || 0,
           fats: aiData.fats || 0,
-          fiber: 0,
+          fiber: aiData.fiber || 0,
           estimatedWeight: 0,
         },
         insights: [
           aiData.recommendation || "Enjoy your meal!",
-          `Health Score: ${aiData.healthScore || 5}/10`
-        ],
+          `Health Score: ${aiData.healthScore || 5}/10`,
+          aiData.suitableFor ? `Best for: ${aiData.suitableFor}` : '',
+        ].filter(Boolean),
+        portionSize: aiData.portionSize,
+        category: aiData.category,
+        suitableFor: aiData.suitableFor,
+        micronutrients: aiData.micronutrients,
       };
 
       setScanResult(mappedResult);
+
+      // Save to database
+      try {
+        await foodScanService.saveScan(user.uid, {
+          food_name: mappedResult.foodName,
+          calories: mappedResult.nutrition.calories,
+          protein: mappedResult.nutrition.protein,
+          carbs: mappedResult.nutrition.carbs,
+          fats: mappedResult.nutrition.fats,
+          fiber: mappedResult.nutrition.fiber,
+          confidence_score: mappedResult.confidence,
+          health_score: aiData.healthScore || 5,
+          portion_size: mappedResult.portionSize,
+          food_category: mappedResult.category,
+          added_to_meal: false,
+          ai_recommendation: aiData.recommendation,
+        });
+
+        // Reload history
+        loadScanHistory();
+      } catch (dbError) {
+        console.error('Failed to save scan:', dbError);
+        pushToast('Scan completed but failed to save to history', 'info');
+      }
+
       pushToast('Analysis Complete!', 'success');
-    } catch (error) {
-      setScanError('AI could not identify this food. Try a clearer angle.');
-      pushToast('Scan failed. See console for details.', 'error');
+    } catch (error: any) {
+      console.error('Scan error:', error);
+      setScanError(error.message || 'AI could not identify this food. Try a clearer angle.');
+      pushToast(error.message || 'Scan failed. Please try again.', 'error');
     } finally {
       setIsScanning(false);
     }
   };
 
-  const handleAddToMeal = () => {
-    if (!scanResult) return;
+  const handleAddToMeal = async () => {
+    if (!scanResult || !user) return;
+
     addScanToMeal(selectedMeal, scanResult.foodName, scanResult.nutrition);
     setAddedToMeal(true);
     pushToast('Meal logged successfully!', 'success');
   };
 
+  const handleDeleteScan = async (scanId: string) => {
+    try {
+      await foodScanService.deleteScan(scanId);
+      pushToast('Scan deleted', 'success');
+      loadScanHistory();
+    } catch (error) {
+      pushToast('Failed to delete scan', 'error');
+    }
+  };
+
   return (
     <section className="space-y-6 pb-20">
-      
+
+      {/* Analytics Cards */}
+      {analytics && (
+        <div className="grid gap-4 md:grid-cols-3 animate-in" style={{ animationDelay: '0ms' }}>
+          <div className="glass-card p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <ScanLine size={16} className="text-primary" />
+              <p className="text-xs font-semibold text-slate-500 uppercase">Total Scans</p>
+            </div>
+            <p className="text-2xl font-bold text-slate-800">{analytics.total}</p>
+          </div>
+          <div className="glass-card p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingUp size={16} className="text-emerald-500" />
+              <p className="text-xs font-semibold text-slate-500 uppercase">Avg Confidence</p>
+            </div>
+            <p className="text-2xl font-bold text-slate-800">{analytics.avgConfidence}%</p>
+          </div>
+          <div className="glass-card p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles size={16} className="text-orange-500" />
+              <p className="text-xs font-semibold text-slate-500 uppercase">Total Analyzed</p>
+            </div>
+            <p className="text-2xl font-bold text-slate-800">{analytics.totalCalories} kcal</p>
+          </div>
+        </div>
+      )}
+
       {/* Scanner Card */}
-      <article className="glass-card p-6 animate-in" style={{ animationDelay: '0ms' }}>
+      <article className="glass-card p-6 animate-in" style={{ animationDelay: '100ms' }}>
         <div className="mb-4 flex items-center gap-2">
           <div className="p-2 bg-gradient-to-r from-primary to-blue-600 rounded-xl text-white shadow-lg shadow-primary/30">
             <ScanLine size={20} />
@@ -210,24 +320,24 @@ export default function FoodScan() {
         </div>
 
         <div className={`relative overflow-hidden rounded-3xl border-2 border-slate-200/50 bg-slate-900 transition-all ${isScanning ? 'ring-4 ring-primary/30 border-primary' : ''}`}>
-          
-          <div className="absolute inset-0 z-0 opacity-20 pointer-events-none" 
-             style={{ backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '20px 20px' }} 
+
+          <div className="absolute inset-0 z-0 opacity-20 pointer-events-none"
+             style={{ backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '20px 20px' }}
           />
 
           <div className="relative z-10 grid gap-4 lg:grid-cols-2 p-4">
-            
+
             {/* Viewfinder */}
             <div className="relative aspect-video overflow-hidden rounded-2xl bg-slate-800 ring-1 ring-white/10 shadow-inner group">
               {isCameraOn ? (
                 <>
-                   <video 
-                     ref={videoRef} 
-                     autoPlay 
-                     playsInline 
-                     muted 
+                   <video
+                     ref={videoRef}
+                     autoPlay
+                     playsInline
+                     muted
                      onLoadedMetadata={() => videoRef.current?.play()}
-                     className="h-full w-full object-cover opacity-90" 
+                     className="h-full w-full object-cover opacity-90"
                    />
                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-primary/20 to-transparent scan-line h-1/4 w-full z-20 border-b-2 border-primary/60 shadow-[0_0_20px_rgba(14,165,233,0.5)]"></div>
                 </>
@@ -243,7 +353,7 @@ export default function FoodScan() {
                   <div className="p-4 rounded-full bg-slate-700/50 group-hover:bg-slate-700 transition-colors">
                     <Camera size={32} className="text-slate-500 group-hover:text-white transition-colors" />
                   </div>
-                  <span>Tap "Open Camera" to start</span>
+                  <span>Open camera or upload image to start</span>
                 </div>
               )}
             </div>
@@ -267,18 +377,18 @@ export default function FoodScan() {
 
               <button className="button-primary w-full justify-start mt-2" type="button" onClick={scanFood} disabled={isScanning || !selectedImage}>
                 {isScanning ? <Loader2 size={16} className="animate-spin" /> : <Cpu size={16} />}
-                {isScanning ? 'Processing...' : 'Scan Food'}
+                {isScanning ? 'Analyzing with AI...' : 'Scan Food'}
               </button>
 
               <div className="rounded-xl bg-slate-800/50 p-3 text-xs text-slate-400 border border-slate-700">
                 {scanError ? (
                   <span className="text-red-400">{scanError}</span>
                 ) : isScanning ? (
-                  <span className="text-primary animate-pulse">AI is analyzing nutrition data...</span>
+                  <span className="text-primary animate-pulse">Gemini AI is analyzing nutrition data...</span>
                 ) : selectedImage ? (
-                  <span className="text-green-400">Image ready. Click 'Scan Food'.</span>
+                  <span className="text-green-400">Image ready. Click Scan Food to analyze.</span>
                 ) : (
-                  'Ready to scan'
+                  'Ready to scan. Camera or upload required.'
                 )}
               </div>
             </div>
@@ -289,12 +399,18 @@ export default function FoodScan() {
       {/* Results Section */}
       {scanResult && (
         <article className="grid gap-6 lg:grid-cols-3 animate-in" style={{ animationDelay: '200ms' }}>
-          
+
           <div className="glass-card space-y-4 p-6 lg:col-span-2">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase text-slate-500 tracking-wider">Detected Food</p>
                 <h3 className="text-2xl font-bold text-slate-800">{scanResult.foodName}</h3>
+                {scanResult.portionSize && (
+                  <p className="text-sm text-slate-600 mt-1">Portion: {scanResult.portionSize}</p>
+                )}
+                {scanResult.category && (
+                  <p className="text-xs text-slate-500 mt-1">Category: {scanResult.category}</p>
+                )}
               </div>
               <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700 shadow-sm border border-emerald-200">
                 <Sparkles size={12} /> {scanResult.confidence}% Confidence
@@ -324,6 +440,7 @@ export default function FoodScan() {
                   { key: 'Protein', value: scanResult.nutrition.protein, max: 50, color: 'bg-primary' },
                   { key: 'Carbs', value: scanResult.nutrition.carbs, max: 100, color: 'bg-emerald-500' },
                   { key: 'Fats', value: scanResult.nutrition.fats, max: 40, color: 'bg-amber-500' },
+                  { key: 'Fiber', value: scanResult.nutrition.fiber, max: 20, color: 'bg-purple-500' },
                 ].map((item) => (
                   <div key={item.key} className="space-y-1">
                     <div className="flex justify-between text-xs font-medium">
@@ -340,6 +457,13 @@ export default function FoodScan() {
                 ))}
               </div>
             </div>
+
+            {scanResult.micronutrients && (
+              <div className="rounded-xl bg-indigo-50 p-3 border border-indigo-100">
+                <p className="text-xs font-semibold text-indigo-700 mb-1">Micronutrients</p>
+                <p className="text-sm text-indigo-600">{scanResult.micronutrients}</p>
+              </div>
+            )}
           </div>
 
           <div className="space-y-6">
@@ -364,7 +488,7 @@ export default function FoodScan() {
                 </button>
                 {addedToMeal && (
                   <p className="flex items-center gap-2 rounded-xl bg-green-50 px-3 py-2 text-xs font-medium text-green-700 border border-green-100">
-                    <CheckCircle2 size={14} /> Added!
+                    <CheckCircle2 size={14} /> Added to {selectedMeal} meal!
                   </p>
                 )}
              </div>
@@ -377,8 +501,51 @@ export default function FoodScan() {
                      {insight}
                    </li>
                  ))}
+                 {scanResult.suitableFor && (
+                   <li className="rounded-xl bg-blue-50 p-3 border border-blue-100 text-blue-700 font-medium">
+                     Suitable for: {scanResult.suitableFor}
+                   </li>
+                 )}
                </ul>
              </div>
+          </div>
+        </article>
+      )}
+
+      {/* Scan History */}
+      {recentScans.length > 0 && (
+        <article className="glass-card p-6 animate-in" style={{ animationDelay: '300ms' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <History size={18} className="text-primary" />
+            <h3 className="text-lg font-bold text-slate-800">Recent Scans</h3>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {recentScans.map((scan) => (
+              <div key={scan.id} className="rounded-xl bg-white/80 p-4 border border-slate-100 hover:border-primary/30 transition-all group">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm">{scan.food_name}</p>
+                    <p className="text-xs text-slate-500">{new Date(scan.created_at).toLocaleDateString()}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteScan(scan.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded text-red-500"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                <div className="flex justify-between text-xs text-slate-600">
+                  <span>{scan.calories} kcal</span>
+                  <span>P: {scan.protein}g</span>
+                  <span>C: {scan.carbs}g</span>
+                  <span>F: {scan.fats}g</span>
+                </div>
+                {scan.meal_type && (
+                  <p className="text-xs text-primary mt-2 capitalize">{scan.meal_type} meal</p>
+                )}
+              </div>
+            ))}
           </div>
         </article>
       )}

@@ -1,7 +1,6 @@
 import {
   BrainCircuit,
   Droplets,
-  Flame,
   ScanLine,
   Sparkles,
   TrendingUp,
